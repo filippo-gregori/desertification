@@ -1,0 +1,153 @@
+import os
+import random
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from osgeo import gdal
+
+# File paths
+input_file = "/home/fgregori/Desktop/umidita_extracted/output/classified_map.tif"
+output_file = "/home/fgregori/Desktop/umidita_extracted/output/regione_mediterraneo.tif"
+csv_file = "/home/fgregori/Desktop/umidita_extracted/output/monitoraggio.csv"
+
+# Clipping coordinates
+cut_bounds = {
+    "xmin": -10,
+    "xmax": 40,
+    "ymin": 30,
+    "ymax": 45
+}
+
+# Crop the raster
+def crop_raster(input_file, output_file, bounds):
+    dataset = gdal.Open(input_file)
+    gt = dataset.GetGeoTransform()
+    proj = dataset.GetProjection()
+
+    # Calculate pixel indices for cropping
+    x_min_idx = int((bounds["xmin"] - gt[0]) / gt[1])
+    x_max_idx = int((bounds["xmax"] - gt[0]) / gt[1])
+    y_min_idx = int((bounds["ymax"] - gt[3]) / gt[5])
+    y_max_idx = int((bounds["ymin"] - gt[3]) / gt[5])
+
+    # Crop the array
+    array = dataset.ReadAsArray()
+    cropped_array = array[y_min_idx:y_max_idx, x_min_idx:x_max_idx]
+
+    # Save the cropped raster
+    driver = gdal.GetDriverByName("GTiff")
+    out_dataset = driver.Create(
+        output_file, x_max_idx - x_min_idx, y_max_idx - y_min_idx, 1, gdal.GDT_Int32
+    )
+    out_dataset.SetGeoTransform((
+        bounds["xmin"], gt[1], gt[2],
+        bounds["ymax"], gt[4], gt[5]
+    ))
+    out_dataset.SetProjection(proj)
+    out_band = out_dataset.GetRasterBand(1)
+    out_band.WriteArray(cropped_array)
+    out_band.SetNoDataValue(-9999)
+    out_dataset.FlushCache()
+    del out_dataset
+
+# Generate random points (only category 4)
+def generate_random_points(raster_file, category, num_points, output_csv):
+    dataset = gdal.Open(raster_file)
+    gt = dataset.GetGeoTransform()
+    array = dataset.ReadAsArray()
+
+    points = []
+    rows, cols = array.shape
+
+    # Find all pixels belonging to the specified category
+    category_indices = np.column_stack(np.where(array == category))
+    selected_indices = random.sample(
+        list(category_indices), min(num_points, len(category_indices))
+    )
+
+    # Generate points with ID, category, and coordinates
+    for row, col in selected_indices:
+        x = gt[0] + col * gt[1] + row * gt[2]
+        y = gt[3] + col * gt[4] + row * gt[5]
+        points.append({
+            "ID": len(points) + 1,
+            "Category": category,
+            "Lon": x,
+            "Lat": y
+        })
+
+    # Verify that points belong only to category 4
+    for point in points:
+        if point["Category"] != 4:
+            raise ValueError(f"Point outside category detected: {point}")
+
+    # Save points to a CSV
+    df = pd.DataFrame(points)
+    df.to_csv(output_csv, index=False)
+    print(f"All points belong to category {category}.")
+
+# Visualize the cropped map with overlaid points
+def plot_raster_with_points(raster_file, points_csv):
+    # Load the raster
+    dataset = gdal.Open(raster_file)
+    raster_array = dataset.ReadAsArray()
+    geo_transform = dataset.GetGeoTransform()
+    x_min = geo_transform[0]
+    y_max = geo_transform[3]
+    pixel_width = geo_transform[1]
+    pixel_height = geo_transform[5]
+    x_max = x_min + (dataset.RasterXSize * pixel_width)
+    y_min = y_max + (dataset.RasterYSize * pixel_height)
+
+    # Load the points
+    points = pd.read_csv(points_csv)
+
+    # Create the plot
+    plt.figure(figsize=(12, 8))
+    plt.title("Cropped Map with Random Points (Category 4)")
+    plt.imshow(raster_array, cmap="tab10", extent=[x_min, x_max, y_min, y_max], origin="upper")
+    plt.colorbar(label="CDI Categories")
+    plt.scatter(points["Lon"], points["Lat"], color="red", label="Category 4 Points", s=10, alpha=0.7)
+    plt.xlabel("Longitude")
+    plt.ylabel("Latitude")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+# Plot category frequencies
+def plot_category_frequencies(raster_file):
+    dataset = gdal.Open(raster_file)
+    raster_array = dataset.ReadAsArray()
+
+    # Calculate the frequency of each category
+    unique, counts = np.unique(raster_array, return_counts=True)
+    frequencies = dict(zip(unique, counts))
+
+    # Remove NoData values (-9999)
+    if -9999 in frequencies:
+        del frequencies[-9999]
+
+    # Create the plot
+    plt.figure(figsize=(10, 6))
+    plt.bar(frequencies.keys(), frequencies.values(), color="skyblue", edgecolor="black")
+    plt.title("Frequency of CDI Categories in the Cropped Raster")
+    plt.xlabel("CDI Category")
+    plt.ylabel("Frequency (Number of Pixels)")
+    plt.xticks(list(frequencies.keys()))
+    plt.tight_layout()
+    plt.show()
+
+# Execute cropping
+crop_raster(input_file, output_file, cut_bounds)
+
+# Generate random points and save to CSV (only category 4)
+generate_random_points(output_file, category=4, num_points=300, output_csv=csv_file)
+
+# Visualize the cropped map with overlaid points
+plot_raster_with_points(output_file, csv_file)
+
+# Show category frequency plot
+plot_category_frequencies(output_file)
+
+print(f"Cropped map saved to: {output_file}")
+print(f"Random points saved to: {csv_file}")
