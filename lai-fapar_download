@@ -1,0 +1,168 @@
+import os
+from netCDF4 import Dataset
+import numpy as np
+from ftplib import FTP
+
+# Configurazione
+ftp_base_url = "ftp://anon-ftp.ceda.ac.uk/neodc/esacci/vegetation_parameters/data/L3S/vp_products/v1.0/transect"
+output_base_dir = "/home/fgregori/Object_Data/variables/vegetation_data"
+lai_dir = os.path.join(output_base_dir, "LAI")
+fapar_dir = os.path.join(output_base_dir, "fAPAR")
+
+# Area di ritaglio (xmin, ymin, xmax, ymax)
+lat_min, lat_max = 30, 45
+lon_min, lon_max = -10, 40
+
+# Anni di interesse
+years = range(2000, 2021)
+
+# Piastrelle di interesse (tutte inizialmente incluse per verifica)
+tiles = [
+    "X18Y02", "X19Y00", "X19Y01", "X19Y02", "X19Y03", "X19Y04", "X19Y05", "X19Y06", "X19Y07", "X19Y08", "X19Y09", "X19Y10",
+    "X20Y00", "X20Y01", "X20Y02", "X20Y03", "X20Y04", "X20Y05", "X20Y06", "X20Y07", "X20Y08", "X20Y09", "X20Y10"
+]
+
+# Creazione delle cartelle di output
+os.makedirs(lai_dir, exist_ok=True)
+os.makedirs(fapar_dir, exist_ok=True)
+
+def list_files(ftp, remote_dir):
+    try:
+        ftp.cwd(remote_dir)
+        return ftp.nlst()
+    except Exception as e:
+        print(f"Errore durante l'elencazione dei file in {remote_dir}: {e}")
+        return []
+
+# Funzione per scaricare un file FTP
+def download_file(remote_path, local_path):
+    try:
+        ftp = FTP("anon-ftp.ceda.ac.uk")
+        ftp.login()
+        remote_dir, file_name = os.path.split(remote_path.replace("ftp://anon-ftp.ceda.ac.uk", ""))
+        ftp.cwd(remote_dir)
+        with open(local_path, "wb") as f:
+            ftp.retrbinary(f"RETR {file_name}", f.write)
+        ftp.quit()
+        print(f"File scaricato: {local_path}")
+    except Exception as e:
+        print(f"Errore durante il download di {remote_path}: {e}")
+
+# Funzione per verificare i limiti delle coordinate di una piastrella
+def verify_tile_limits(remote_path):
+    try:
+        local_path = os.path.join(output_base_dir, "temp", os.path.basename(remote_path))
+        download_file(remote_path, local_path)
+
+        dataset = Dataset(local_path, mode="r")
+        lat = dataset.variables["lat"][:]
+        lon = dataset.variables["lon"][:]
+        dataset.close()
+
+        return lat.min(), lat.max(), lon.min(), lon.max()
+    except Exception as e:
+        print(f"Errore durante la verifica delle coordinate per {remote_path}: {e}")
+        return None, None, None, None
+
+# Filtrare le piastrelle che si sovrappongono all'area di interesse
+def filter_tiles():
+    valid_tiles = []
+    ftp = FTP("anon-ftp.ceda.ac.uk")
+    ftp.login()
+
+    for tile in tiles:
+        remote_dir = f"/neodc/esacci/vegetation_parameters/data/L3S/vp_products/v1.0/transect/2000/{tile}"
+        files = list_files(ftp, remote_dir)
+        if files:
+            sample_file = f"ftp://anon-ftp.ceda.ac.uk{remote_dir}/{files[0]}"
+            lat_min_tile, lat_max_tile, lon_min_tile, lon_max_tile = verify_tile_limits(sample_file)
+
+            if lat_min_tile is not None and lon_min_tile is not None:
+                if lat_max_tile >= lat_min and lat_min_tile <= lat_max and \
+                   lon_max_tile >= lon_min and lon_min_tile <= lon_max:
+                    valid_tiles.append(tile)
+
+    ftp.quit()
+    return valid_tiles
+
+# Aggiorna l'elenco delle piastrelle valide
+tiles = filter_tiles()
+print(f"Piastrelle valide trovate: {tiles}")
+
+# Funzione per ritagliare e salvare variabili
+def process_variable(local_path, variable, output_dir, lat_min, lat_max, lon_min, lon_max):
+    try:
+        dataset = Dataset(local_path, mode="r")
+
+        # Estrazione delle coordinate
+        lat = dataset.variables["lat"][:]
+        lon = dataset.variables["lon"][:]
+
+        # Trovare gli indici delle coordinate nell'area di interesse
+        lat_indices = np.where((lat >= lat_min) & (lat <= lat_max))[0]
+        lon_indices = np.where((lon >= lon_min) & (lon <= lon_max))[0]
+
+        # Verifica se gli indici sono validi
+        if len(lat_indices) == 0 or len(lon_indices) == 0:
+            print(f"Nessun dato nell'area specificata per {variable} in {local_path}")
+            dataset.close()
+            return
+
+        # Estrarre e ritagliare la variabile
+        data = dataset.variables[variable][:]
+        data_cropped = data[:, lat_indices.min():lat_indices.max()+1, lon_indices.min():lon_indices.max()+1]
+
+        # Salvare i dati ritagliati in un nuovo file NetCDF
+        output_path = os.path.join(output_dir, os.path.basename(local_path).replace(".nc", f"_{variable}_cropped.nc"))
+        with Dataset(output_path, "w", format="NETCDF4") as nc_out:
+            # Creare le dimensioni
+            nc_out.createDimension("time", data.shape[0])
+            nc_out.createDimension("lat", len(lat_indices))
+            nc_out.createDimension("lon", len(lon_indices))
+
+            # Creare le variabili
+            lat_out = nc_out.createVariable("lat", "f4", ("lat",))
+            lon_out = nc_out.createVariable("lon", "f4", ("lon",))
+            time_out = nc_out.createVariable("time", "f4", ("time",))
+            data_out = nc_out.createVariable(variable, "f4", ("time", "lat", "lon"))
+
+            # Assegnare i dati
+            lat_out[:] = lat[lat_indices]
+            lon_out[:] = lon[lon_indices]
+            time_out[:] = dataset.variables["time"][:]
+            data_out[:, :, :] = data_cropped
+
+        print(f"Variabile {variable} salvata in: {output_path}")
+        dataset.close()
+    except Exception as e:
+        print(f"Errore durante l'elaborazione della variabile {variable}: {e}")
+
+# Iterazione su anni, piastrelle e file
+for year in years:
+    for tile in tiles:
+        base_tile_path = f"{ftp_base_url}/{year}/{tile}"
+        try:
+            # Connessione al server FTP per elencare i file
+            ftp = FTP("anon-ftp.ceda.ac.uk")
+            ftp.login()
+            remote_dir = base_tile_path.replace("ftp://anon-ftp.ceda.ac.uk", "")
+            files = list_files(ftp, remote_dir)
+            ftp.quit()
+
+            # Elaborare ogni file nella piastrella
+            for file_name in files:
+                if file_name.endswith(".nc"):
+                    remote_file = f"ftp://anon-ftp.ceda.ac.uk{remote_dir}/{file_name}"
+                    local_file = os.path.join(output_base_dir, "temp", file_name)
+
+                    # Scaricare il file
+                    download_file(remote_file, local_file)
+
+                    # Elaborazione per LAI
+                    process_variable(local_file, "LAI", lai_dir, lat_min, lat_max, lon_min, lon_max)
+
+                    # Elaborazione per fAPAR
+                    process_variable(local_file, "fAPAR", fapar_dir, lat_min, lat_max, lon_min, lon_max)
+
+        except Exception as e:
+            print(f"Errore durante l'accesso a {base_tile_path}: {e}")
