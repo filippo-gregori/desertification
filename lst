@@ -1,0 +1,104 @@
+import os
+from ftplib import FTP
+import xarray as xr
+from osgeo import gdal
+import numpy as np
+from tqdm import tqdm
+
+# General settings
+ftp_server = "anon-ftp.ceda.ac.uk"
+ftp_path = "/neodc/esacci/land_surface_temperature/data/MULTISENSOR_IRCDR/L3S/0.01/v2.00/monthly"
+save_path = "/home/fgregori/Object_Data/variables/LST"
+os.makedirs(save_path, exist_ok=True)
+
+# Area of interest
+lat_bounds = [30, 45]  # South and North
+lon_bounds = [-10, 40]  # West and East
+
+# Function to download a file
+def download_file(ftp, remote_path, local_path):
+    with open(local_path, "wb") as f:
+        ftp.retrbinary(f"RETR {remote_path}", f.write)
+
+# Function to crop and save as GeoTIFF
+def crop_and_save_to_geotiff(nc_file, output_file, lat_bounds, lon_bounds):
+    with xr.open_dataset(nc_file) as ds:
+        # Extract the main temperature data (e.g., 'lst')
+        var_name = 'lst'  # Modify if necessary
+        if var_name not in ds:
+            raise ValueError(f"The variable {var_name} is not present in the file {nc_file}")
+        data = ds[var_name]
+
+        # If the data has a temporal dimension, select the first timestep
+        if "time" in data.dims:
+            time_value = str(ds["time"].values[0])[:10]  # Extract the date
+            data = data.isel(time=0)
+        else:
+            time_value = ""
+
+        # Crop the area of interest
+        cropped = data.sel(lat=slice(*lat_bounds), lon=slice(*lon_bounds))
+
+        # Create a GDAL-compatible array
+        data_array = cropped.values
+        data_array = np.flipud(data_array)  # Flip to correct orientation
+
+        # Calculate the geographic transformation
+        lon_min, lon_max = lon_bounds
+        lat_min, lat_max = lat_bounds
+        n_lat, n_lon = data_array.shape
+        pixel_size_x = (lon_max - lon_min) / n_lon
+        pixel_size_y = (lat_max - lat_min) / n_lat
+
+        transform = [
+            lon_min, pixel_size_x, 0,
+            lat_max, 0, -pixel_size_y
+        ]
+
+        # Save as GeoTIFF
+        driver = gdal.GetDriverByName("GTiff")
+        output_file_with_date = output_file.replace(".tif", f"_{time_value}.tif")
+        out_ds = driver.Create(
+            output_file_with_date,
+            n_lon,
+            n_lat,
+            1,
+            gdal.GDT_Float32
+        )
+
+        out_ds.SetGeoTransform(transform)
+        out_ds.SetProjection("EPSG:4326")  # WGS84 geographic coordinate system
+        out_band = out_ds.GetRasterBand(1)
+        out_band.WriteArray(data_array)
+        out_band.SetNoDataValue(-9999)
+        out_band.FlushCache()
+        out_ds = None  # Close the dataset
+
+# Connect to the FTP server
+ftp = FTP(ftp_server)
+ftp.login()
+ftp.cwd(ftp_path)
+
+# Iterate over years and months
+for year in tqdm(range(2002, 2021), desc="Years", unit="year"):
+    for month in tqdm(range(1, 13), desc=f"Months in {year}", unit="month", leave=False):
+        month_str = f"{month:02d}"
+        year_path = f"{ftp_path}/{year}/{month_str}"
+        ftp.cwd(year_path)
+
+        # Get the file of interest
+        files = ftp.nlst()
+        for file in tqdm(files, desc=f"Processing file {year}-{month_str}", unit="file", leave=False):
+            if file.endswith(".nc"):
+                local_file = os.path.join(save_path, file)
+                download_file(ftp, file, local_file)
+                
+                # Crop and save as GeoTIFF
+                output_tiff = local_file.replace(".nc", ".tif")
+                crop_and_save_to_geotiff(local_file, output_tiff, lat_bounds, lon_bounds)
+                
+                # Remove the original file to save space
+                os.remove(local_file)
+
+# Disconnect from the FTP server
+ftp.quit()
