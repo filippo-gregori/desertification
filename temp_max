@@ -1,0 +1,94 @@
+import os
+import requests
+from osgeo import gdal
+gdal.SetConfigOption("GTIFF_SRS_SOURCE", "EPSG")
+
+import numpy as np
+
+def download_file(url, save_path):
+    """Downloads a file from a URL and saves it to a specific location."""
+    try:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        with open(save_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        print(f"Download completed: {save_path}")
+    except requests.RequestException as e:
+        print(f"Error during download of {url}: {e}")
+
+def clip_raster(input_path, output_path, bbox):
+    """Clips a raster to a specific bounding box and saves the result."""
+    try:
+        gdal.Warp(output_path, input_path, outputBounds=bbox, format='GTiff')
+        print(f"Raster clipped and saved: {output_path}")
+    except Exception as e:
+        print(f"Error during clipping of raster {input_path}: {e}")
+
+def calculate_statistics(filepath):
+    """Calculates basic statistics (min, max, mean, std dev) for a raster."""
+    try:
+        dataset = gdal.Open(filepath)
+        band = dataset.GetRasterBand(1)
+        data = band.ReadAsArray()
+        no_data_value = band.GetNoDataValue()
+        if no_data_value is not None:
+            data = np.where(data == no_data_value, np.nan, data)
+        stats = {
+            "min": np.nanmin(data),
+            "max": np.nanmax(data),
+            "mean": np.nanmean(data),
+            "std": np.nanstd(data)
+        }
+        return stats
+    except Exception as e:
+        print(f"Error during calculation of statistics for {filepath}: {e}")
+        return None
+
+def main():
+    links_path = "/home/fgregori/Object_Data/tmax.txt"
+    output_dir = "/home/fgregori/Object_Data/chelsa-dataset/tmax"
+    
+    # Create the output directory
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Bounding box for clipping
+    bbox = (-10.0, 30.0, 40.0, 45.0)
+    
+    # Read links from the file
+    with open(links_path, 'r') as file:
+        links = [line.strip() for line in file if line.strip()]
+    
+    report = []
+    
+    for link in links:
+        filename = os.path.basename(link)
+        local_path = os.path.join(output_dir, filename)
+        clipped_path = os.path.join(output_dir, f"clipped_{filename}")
+        
+        # Download the file
+        download_file(link, local_path)
+        
+        # Clip the raster
+        clip_raster(local_path, clipped_path, bbox)
+        
+        # Calculate statistics
+        stats = calculate_statistics(clipped_path)
+        if stats:
+            report.append({
+                "file": os.path.basename(clipped_path),
+                "stats": stats
+            })
+    
+    # Generate the report
+    report_path = os.path.join(output_dir, "report.txt")
+    with open(report_path, 'w') as f:
+        for entry in report:
+            f.write(f"File: {entry['file']}\n")
+            for key, value in entry['stats'].items():
+                f.write(f"  {key}: {value}\n")
+            f.write("\n")
+    print(f"Report generated at: {report_path}")
+
+if __name__ == "__main__":
+    main()
