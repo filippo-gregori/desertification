@@ -7,17 +7,17 @@ from datetime import datetime
 
 gdal.UseExceptions()
 
-# Directory contenenti file raster
+# Directories containing raster files
 raster_dir = "/home/fgregori/Object_Data/umidita_extracted/umidita"
 output_dir = "/home/fgregori/Object_Data/umidita_extracted/outputt"
 os.makedirs(output_dir, exist_ok=True)
 
-# File di output per la mappa di vulnerabilità
+# Output files for the vulnerability map
 vulnerability_file = os.path.join(output_dir, "vulnerability_map_with_frequencies_and_time.tif")
 vulnerability_clipped_file = os.path.join(output_dir, "vulnerability_map_clipped.tif")
 vulnerability_normalized_clipped_file = os.path.join(output_dir, "vulnerability_map_normalized_clipped.tif")
 
-# Bounding box dell'area di studio (coordinate in gradi)
+# Bounding box of the study area (coordinates in degrees)
 bounding_box = {
     "north": 45.0,
     "south": 30.0,
@@ -25,12 +25,12 @@ bounding_box = {
     "east": 40.0
 }
 
-# Elenco dei file raster ordinati per data
+# List of raster files sorted by date
 raster_files = sorted(glob.glob(os.path.join(raster_dir, "*.tif")))
 if not raster_files:
     raise FileNotFoundError(f"No raster files found in directory: {raster_dir}")
 
-# Estrai le date dai nomi dei file
+# Extract dates from file names
 dates = []
 for file in raster_files:
     filename = os.path.basename(file)
@@ -44,18 +44,18 @@ for file in raster_files:
 if not dates:
     raise ValueError("No valid dates found in raster file names.")
 
-# Pesi temporali basati sulla differenza di tempo
+# Temporal weights based on time difference
 latest_date = max(dates)
 temporal_weights = [
     1.0 - (latest_date - date).days / (latest_date - min(dates)).days
     for date in dates
 ]
 
-# Inizializzazione di array per degradazione e frequenza
+# Initialization of arrays for degradation and frequency
 degradation = None
 frequency = {category: None for category in range(8)}
 
-# Pesi per le categorie CDI
+# Weights for CDI categories
 weights = {
     0: 0.0,
     1: 0.2,
@@ -67,7 +67,7 @@ weights = {
     7: np.nan  # No data
 }
 
-# Elaborazione dei dati senza ritaglio
+# Process data without clipping
 for idx, raster_file in enumerate(raster_files):
     dataset = gdal.Open(raster_file, gdalconst.GA_ReadOnly)
     if dataset is None or dataset.RasterCount == 0:
@@ -77,7 +77,7 @@ for idx, raster_file in enumerate(raster_files):
     band = dataset.GetRasterBand(1)
     data = band.ReadAsArray()
 
-    # Gestione dei valori NoData
+    # Handle NoData values
     nodata_value = band.GetNoDataValue()
     if nodata_value is not None:
         data[data == nodata_value] = np.nan
@@ -86,43 +86,43 @@ for idx, raster_file in enumerate(raster_files):
         degradation = np.zeros_like(data, dtype=np.float32)
         frequency = {category: np.zeros_like(data, dtype=np.float32) for category in weights.keys()}
 
-    # Frequenza per categoria
+    # Frequency for each category
     for category, weight in weights.items():
         if np.isnan(weight):
             continue
         mask = (data == category)
         frequency[category][mask] += 1
 
-    # Applica pesi temporali e per categoria
+    # Apply temporal and category weights
     for category, weight in weights.items():
         if np.isnan(weight):
             continue
         mask = (data == category)
         degradation[mask] += weight * temporal_weights[idx]
 
-# Normalizza la frequenza relativa
+# Normalize relative frequency
 total_rasters = len(raster_files)
 for category in frequency.keys():
     frequency[category] /= total_rasters
 
-# Crea la mappa di vulnerabilità
+# Create the vulnerability map
 vulnerability_map = np.zeros_like(degradation, dtype=np.float32)
 for category, weight in weights.items():
     if np.isnan(weight):
         continue
     vulnerability_map += weight * frequency[category] * degradation
 
-# Normalizzazione dei valori della mappa di vulnerabilità
+# Normalize vulnerability map values
 vulnerability_map_normalized = (vulnerability_map - np.min(vulnerability_map)) / (np.max(vulnerability_map) - np.min(vulnerability_map)) * 100
 
-# Visualizza la mappa normalizzata
+# Visualize the normalized map
 plt.figure(figsize=(10, 8))
 plt.title("Vulnerability Map (Normalized)")
 plt.imshow(vulnerability_map_normalized, cmap="YlOrRd")
 plt.colorbar(label="Vulnerability (0-100)")
 plt.show()
 
-# Salva la mappa normalizzata
+# Save the normalized map
 normalized_file = os.path.join(output_dir, "vulnerability_map_normalized.tif")
 driver = gdal.GetDriverByName("GTiff")
 out_dataset = driver.Create(
@@ -142,7 +142,7 @@ del out_dataset
 
 print(f"Normalized vulnerability map saved to: {normalized_file}")
 
-# Applica il ritaglio alla mappa normalizzata
+# Apply clipping to the normalized map
 try:
     dataset = gdal.Open(normalized_file, gdalconst.GA_ReadOnly)
     transform = dataset.GetGeoTransform()
@@ -151,24 +151,24 @@ try:
     x_origin = transform[0]
     y_origin = transform[3]
 
-    # Calcola le coordinate pixel della bounding box
+    # Calculate pixel coordinates of the bounding box
     x_min = max(0, int((bounding_box["west"] - x_origin) / pixel_width))
     x_max = min(dataset.RasterXSize, int((bounding_box["east"] - x_origin) / pixel_width))
     y_min = max(0, int((y_origin - bounding_box["north"]) / -pixel_height))
     y_max = min(dataset.RasterYSize, int((y_origin - bounding_box["south"]) / -pixel_height))
 
-    # Ritaglia i dati
+    # Clip the data
     data = dataset.GetRasterBand(1).ReadAsArray()
     data_clipped = data[y_min:y_max, x_min:x_max]
 
-    # Visualizza la mappa ritagliata
+    # Visualize the clipped map
     plt.figure(figsize=(10, 8))
     plt.title("Vulnerability Map Normalized (Clipped)")
     plt.imshow(data_clipped, cmap="YlOrRd")
     plt.colorbar(label="Vulnerability (0-100)")
     plt.show()
 
-    # Salva la mappa normalizzata ritagliata
+    # Save the clipped normalized map
     clipped_dataset = driver.Create(
         vulnerability_normalized_clipped_file,
         x_max - x_min,
@@ -196,4 +196,5 @@ try:
 
 except Exception as e:
     print(f"Error during clipping: {e}")
+
 
