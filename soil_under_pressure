@@ -1,0 +1,193 @@
+import os
+import glob
+from osgeo import gdal, gdalconst, osr
+import numpy as np
+import matplotlib.pyplot as plt
+from datetime import datetime
+
+gdal.UseExceptions()
+
+# Directory contenenti file raster
+raster_dir = "/home/fgregori/Object_Data/umidita_extracted/umidita"
+output_dir = "/home/fgregori/Object_Data/umidita_extracted/outputt"
+os.makedirs(output_dir, exist_ok=True)
+
+# File di output per la mappa di vulnerabilità
+vulnerability_file = os.path.join(output_dir, "vulnerability_map_with_frequencies_and_time.tif")
+vulnerability_clipped_file = os.path.join(output_dir, "vulnerability_map_clipped.tif")
+
+# Bounding box dell'area di studio (coordinate in gradi)
+bounding_box = {
+    "north": 45.0,
+    "south": 30.0,
+    "west": -10.0,
+    "east": 40.0
+}
+
+# Elenco dei file raster ordinati per data
+raster_files = sorted(glob.glob(os.path.join(raster_dir, "*.tif")))
+if not raster_files:
+    raise FileNotFoundError(f"No raster files found in directory: {raster_dir}")
+
+# Estrai le date dai nomi dei file
+dates = []
+for file in raster_files:
+    filename = os.path.basename(file)
+    try:
+        date_str = filename.split("_")[3]
+        date = datetime.strptime(date_str, "%Y%m%d")
+        dates.append(date)
+    except (IndexError, ValueError):
+        print(f"Warning: Invalid format for file: {filename}")
+
+if not dates:
+    raise ValueError("No valid dates found in raster file names.")
+
+# Pesi temporali basati sulla differenza di tempo
+latest_date = max(dates)
+temporal_weights = [
+    1.0 - (latest_date - date).days / (latest_date - min(dates)).days
+    for date in dates
+]
+
+# Inizializzazione di array per degradazione e frequenza
+degradation = None
+frequency = {category: None for category in range(8)}
+
+# Pesi per le categorie CDI
+weights = {
+    0: 0.0,
+    1: 0.2,
+    2: 0.4,
+    3: 1.0,
+    4: 0.0,
+    5: 0.3,
+    6: 0.5,
+    7: np.nan  # No data
+}
+
+# Elaborazione dei dati senza ritaglio
+for idx, raster_file in enumerate(raster_files):
+    dataset = gdal.Open(raster_file, gdalconst.GA_ReadOnly)
+    if dataset is None or dataset.RasterCount == 0:
+        print(f"Warning: Unable to open raster file: {raster_file}")
+        continue
+
+    band = dataset.GetRasterBand(1)
+    data = band.ReadAsArray()
+
+    # Gestione dei valori NoData
+    nodata_value = band.GetNoDataValue()
+    if nodata_value is not None:
+        data[data == nodata_value] = np.nan
+
+    if degradation is None:
+        degradation = np.zeros_like(data, dtype=np.float32)
+        frequency = {category: np.zeros_like(data, dtype=np.float32) for category in weights.keys()}
+
+    # Frequenza per categoria
+    for category, weight in weights.items():
+        if np.isnan(weight):
+            continue
+        mask = (data == category)
+        frequency[category][mask] += 1
+
+    # Applica pesi temporali e per categoria
+    for category, weight in weights.items():
+        if np.isnan(weight):
+            continue
+        mask = (data == category)
+        degradation[mask] += weight * temporal_weights[idx]
+
+# Normalizza la frequenza relativa
+total_rasters = len(raster_files)
+for category in frequency.keys():
+    frequency[category] /= total_rasters
+
+# Crea la mappa di vulnerabilità
+vulnerability_map = np.zeros_like(degradation, dtype=np.float32)
+for category, weight in weights.items():
+    if np.isnan(weight):
+        continue
+    vulnerability_map += weight * frequency[category] * degradation
+
+# Visualizza la mappa completa
+plt.figure(figsize=(10, 8))
+plt.title("Vulnerability Map (Complete)")
+plt.imshow(vulnerability_map, cmap="YlOrRd")  # Cambiato a YlOrRd per evidenziare il rosso per valori alti
+plt.colorbar(label="Vulnerability")
+plt.show()
+
+# Salva la mappa senza ritaglio
+driver = gdal.GetDriverByName("GTiff")
+out_dataset = driver.Create(
+    vulnerability_file,
+    vulnerability_map.shape[1],
+    vulnerability_map.shape[0],
+    1,
+    gdal.GDT_Float32
+)
+out_dataset.SetGeoTransform(dataset.GetGeoTransform())
+out_dataset.SetProjection(dataset.GetProjection())
+out_band = out_dataset.GetRasterBand(1)
+out_band.WriteArray(vulnerability_map)
+out_band.SetNoDataValue(-9999)
+out_dataset.FlushCache()
+del out_dataset
+
+print(f"Vulnerability map saved to: {vulnerability_file}")
+
+# Applica il ritaglio alla mappa finale
+try:
+    dataset = gdal.Open(vulnerability_file, gdalconst.GA_ReadOnly)
+    transform = dataset.GetGeoTransform()
+    pixel_width = transform[1]
+    pixel_height = transform[5]
+    x_origin = transform[0]
+    y_origin = transform[3]
+
+    # Calcola le coordinate pixel della bounding box
+    x_min = max(0, int((bounding_box["west"] - x_origin) / pixel_width))
+    x_max = min(dataset.RasterXSize, int((bounding_box["east"] - x_origin) / pixel_width))
+    y_min = max(0, int((bounding_box["north"] - y_origin) / pixel_height))
+    y_max = min(dataset.RasterYSize, int((bounding_box["south"] - y_origin) / pixel_height))
+
+    # Ritaglia i dati
+    data = dataset.GetRasterBand(1).ReadAsArray()
+    data_clipped = data[y_min:y_max, x_min:x_max]
+
+    # Visualizza la mappa ritagliata
+    plt.figure(figsize=(10, 8))
+    plt.title("Vulnerability Map (Clipped)")
+    plt.imshow(data_clipped, cmap="YlOrRd")  # Cambiato a YlOrRd per evidenziare il rosso per valori alti
+    plt.colorbar(label="Vulnerability")
+    plt.show()
+
+    # Salva la mappa ritagliata
+    clipped_dataset = driver.Create(
+        vulnerability_clipped_file,
+        x_max - x_min,
+        y_max - y_min,
+        1,
+        gdal.GDT_Float32
+    )
+    new_transform = (
+        x_origin + x_min * pixel_width,
+        pixel_width,
+        0,
+        y_origin + y_min * pixel_height,
+        0,
+        pixel_height
+    )
+    clipped_dataset.SetGeoTransform(new_transform)
+    clipped_dataset.SetProjection(dataset.GetProjection())
+    clipped_band = clipped_dataset.GetRasterBand(1)
+    clipped_band.WriteArray(data_clipped)
+    clipped_band.SetNoDataValue(-9999)
+    clipped_dataset.FlushCache()
+    del clipped_dataset
+
+    print(f"Clipped vulnerability map saved to: {vulnerability_clipped_file}")
+
+except Exception as e:
+    print(f"Error during clipping: {e}")
