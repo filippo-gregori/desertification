@@ -15,6 +15,7 @@ os.makedirs(output_dir, exist_ok=True)
 # File di output per la mappa di vulnerabilità
 vulnerability_file = os.path.join(output_dir, "vulnerability_map_with_frequencies_and_time.tif")
 vulnerability_clipped_file = os.path.join(output_dir, "vulnerability_map_clipped.tif")
+vulnerability_normalized_clipped_file = os.path.join(output_dir, "vulnerability_map_normalized_clipped.tif")
 
 # Bounding box dell'area di studio (coordinate in gradi)
 bounding_box = {
@@ -111,17 +112,21 @@ for category, weight in weights.items():
         continue
     vulnerability_map += weight * frequency[category] * degradation
 
-# Visualizza la mappa completa
+# Normalizzazione dei valori della mappa di vulnerabilità
+vulnerability_map_normalized = (vulnerability_map - np.min(vulnerability_map)) / (np.max(vulnerability_map) - np.min(vulnerability_map)) * 100
+
+# Visualizza la mappa normalizzata
 plt.figure(figsize=(10, 8))
-plt.title("Vulnerability Map (Complete)")
-plt.imshow(vulnerability_map, cmap="YlOrRd")  # Cambiato a YlOrRd per evidenziare il rosso per valori alti
-plt.colorbar(label="Vulnerability")
+plt.title("Vulnerability Map (Normalized)")
+plt.imshow(vulnerability_map_normalized, cmap="YlOrRd")
+plt.colorbar(label="Vulnerability (0-100)")
 plt.show()
 
-# Salva la mappa senza ritaglio
+# Salva la mappa normalizzata
+normalized_file = os.path.join(output_dir, "vulnerability_map_normalized.tif")
 driver = gdal.GetDriverByName("GTiff")
 out_dataset = driver.Create(
-    vulnerability_file,
+    normalized_file,
     vulnerability_map.shape[1],
     vulnerability_map.shape[0],
     1,
@@ -130,16 +135,16 @@ out_dataset = driver.Create(
 out_dataset.SetGeoTransform(dataset.GetGeoTransform())
 out_dataset.SetProjection(dataset.GetProjection())
 out_band = out_dataset.GetRasterBand(1)
-out_band.WriteArray(vulnerability_map)
+out_band.WriteArray(vulnerability_map_normalized)
 out_band.SetNoDataValue(-9999)
 out_dataset.FlushCache()
 del out_dataset
 
-print(f"Vulnerability map saved to: {vulnerability_file}")
+print(f"Normalized vulnerability map saved to: {normalized_file}")
 
-# Applica il ritaglio alla mappa finale
+# Applica il ritaglio alla mappa normalizzata
 try:
-    dataset = gdal.Open(vulnerability_file, gdalconst.GA_ReadOnly)
+    dataset = gdal.Open(normalized_file, gdalconst.GA_ReadOnly)
     transform = dataset.GetGeoTransform()
     pixel_width = transform[1]
     pixel_height = transform[5]
@@ -149,8 +154,8 @@ try:
     # Calcola le coordinate pixel della bounding box
     x_min = max(0, int((bounding_box["west"] - x_origin) / pixel_width))
     x_max = min(dataset.RasterXSize, int((bounding_box["east"] - x_origin) / pixel_width))
-    y_min = max(0, int((bounding_box["north"] - y_origin) / pixel_height))
-    y_max = min(dataset.RasterYSize, int((bounding_box["south"] - y_origin) / pixel_height))
+    y_min = max(0, int((y_origin - bounding_box["north"]) / -pixel_height))
+    y_max = min(dataset.RasterYSize, int((y_origin - bounding_box["south"]) / -pixel_height))
 
     # Ritaglia i dati
     data = dataset.GetRasterBand(1).ReadAsArray()
@@ -158,14 +163,14 @@ try:
 
     # Visualizza la mappa ritagliata
     plt.figure(figsize=(10, 8))
-    plt.title("Vulnerability Map (Clipped)")
-    plt.imshow(data_clipped, cmap="YlOrRd")  # Cambiato a YlOrRd per evidenziare il rosso per valori alti
-    plt.colorbar(label="Vulnerability")
+    plt.title("Vulnerability Map Normalized (Clipped)")
+    plt.imshow(data_clipped, cmap="YlOrRd")
+    plt.colorbar(label="Vulnerability (0-100)")
     plt.show()
 
-    # Salva la mappa ritagliata
+    # Salva la mappa normalizzata ritagliata
     clipped_dataset = driver.Create(
-        vulnerability_clipped_file,
+        vulnerability_normalized_clipped_file,
         x_max - x_min,
         y_max - y_min,
         1,
@@ -187,7 +192,8 @@ try:
     clipped_dataset.FlushCache()
     del clipped_dataset
 
-    print(f"Clipped vulnerability map saved to: {vulnerability_clipped_file}")
+    print(f"Clipped normalized vulnerability map saved to: {vulnerability_normalized_clipped_file}")
 
 except Exception as e:
     print(f"Error during clipping: {e}")
+
