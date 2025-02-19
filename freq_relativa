@@ -1,0 +1,67 @@
+import numpy as np
+import os
+import glob
+from osgeo import gdal, gdal_array
+
+# Definizione dei percorsi
+input_folder = r'C:\umidita'
+output_folder = r'C:\umidita_output\freq_relativa'
+os.makedirs(output_folder, exist_ok=True)
+
+# Lista di file raster
+raster_files = sorted(glob.glob(os.path.join(input_folder, "*.tif")))  # Assumo TIFF come formato
+
+# Legge il primo raster per ottenere dimensioni e metadati
+sample_raster = gdal.Open(raster_files[0])
+cols = sample_raster.RasterXSize
+rows = sample_raster.RasterYSize
+geotransform = sample_raster.GetGeoTransform()
+projection = sample_raster.GetProjection()
+sample_raster = None  # Chiudi il file
+
+# Caricamento di tutti i raster in un array 3D (time, rows, cols) con dtype=int16 per evitare overflow
+num_rasters = len(raster_files)
+stack = np.zeros((num_rasters, rows, cols), dtype=np.int16)  # Cambiato da uint8 a int16
+
+for i, raster_path in enumerate(raster_files):
+    dataset = gdal.Open(raster_path)
+    band = dataset.GetRasterBand(1)
+    nodata_value = band.GetNoDataValue()  # Ottieni il valore NoData
+    raster_array = band.ReadAsArray()
+
+    # Se il valore NoData è definito, sostituiscilo con -1
+    if nodata_value is not None:
+        raster_array[raster_array == nodata_value] = -1
+
+    # Rimuove la categoria 8
+    raster_array[raster_array == 8] = -1  # Segna la categoria 8 come -1
+
+    stack[i, :, :] = raster_array
+    dataset = None  # Chiudi il raster
+
+# Esclude NoData (-1) e la categoria 8 prima di identificare le categorie
+valid_mask = (stack >= 0) & (stack <= 7)
+stack[~valid_mask] = -1  # Segna come -1 i valori non validi
+
+# Identificazione delle categorie presenti nei dati (senza la categoria 8)
+unique_categories = np.unique(stack[stack != -1])  # Escludiamo tutto ciò che è -1
+
+# Creazione delle mappe di frequenza relativa per ogni categoria
+for category in unique_categories:
+    frequency_map = np.sum(stack == category, axis=0) / num_rasters  # Frelativa(c, x, y)
+
+    # Salvataggio del raster di output
+    output_path = os.path.join(output_folder, f"frequency_category_{category}.tif")
+    driver = gdal.GetDriverByName("GTiff")
+    out_raster = driver.Create(output_path, cols, rows, 1, gdal.GDT_Float32)
+    out_raster.SetGeoTransform(geotransform)
+    out_raster.SetProjection(projection)
+    
+    out_band = out_raster.GetRasterBand(1)
+    out_band.WriteArray(frequency_map)
+    out_band.SetNoDataValue(-9999)  # Imposta NoData
+    out_band.FlushCache()
+    
+    out_raster = None  # Chiudi il raster
+
+print(f"Mappe di frequenza relative salvate in {output_folder}")
