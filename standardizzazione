@@ -1,0 +1,61 @@
+import os
+import numpy as np
+import glob
+from osgeo import gdal
+
+def standardize_raster(input_path, output_path):
+    """Standardizza un raster applicando la trasformazione Z-score."""
+    dataset = gdal.Open(input_path)
+    band = dataset.GetRasterBand(1)
+    array = band.ReadAsArray().astype(np.float32)
+    nodata_value = band.GetNoDataValue()
+    
+    # Identifica i valori validi
+    if nodata_value is not None:
+        valid_mask = array != nodata_value
+    else:
+        valid_mask = np.ones_like(array, dtype=bool)
+    
+    valid_values = array[valid_mask]
+    
+    # Calcola la media e la deviazione standard
+    mean_val = np.mean(valid_values)
+    std_val = np.std(valid_values)
+    
+    # Standardizza il raster
+    standardized_array = np.full_like(array, nodata_value, dtype=np.float32)
+    if std_val > 0:  # Evita la divisione per zero
+        standardized_array[valid_mask] = (array[valid_mask] - mean_val) / std_val
+    
+    # Salvataggio del raster standardizzato
+    driver = gdal.GetDriverByName("GTiff")
+    out_raster = driver.Create(output_path, dataset.RasterXSize, dataset.RasterYSize, 1, gdal.GDT_Float32)
+    out_raster.SetGeoTransform(dataset.GetGeoTransform())
+    out_raster.SetProjection(dataset.GetProjection())
+    
+    out_band = out_raster.GetRasterBand(1)
+    out_band.WriteArray(standardized_array)
+    out_band.SetNoDataValue(nodata_value)
+    out_band.FlushCache()
+    
+    dataset = None
+    out_raster = None
+
+# Percorsi principali
+input_root = r'C:\umidita_output'  # Cartella principale con le variabili
+output_root = r'C:\umidita_output\standardized'  # Cartella di output
+
+# Scansiona tutte le sottocartelle e i raster contenuti
+for subdir, _, files in os.walk(input_root):
+    relative_path = os.path.relpath(subdir, input_root)
+    output_subdir = os.path.join(output_root, relative_path)
+    os.makedirs(output_subdir, exist_ok=True)
+    
+    for file in files:
+        if file.endswith(".tif"):  # Considera solo i raster TIFF
+            input_path = os.path.join(subdir, file)
+            output_path = os.path.join(output_subdir, file.replace(".tif", "_standardized.tif"))
+            standardize_raster(input_path, output_path)
+            print(f"✅ Standardizzato: {input_path} -> {output_path}")
+
+print("🎯 Tutti i raster sono stati standardizzati e salvati!")
