@@ -1,0 +1,60 @@
+import numpy as np
+import os
+import glob
+from osgeo import gdal, gdal_array
+from scipy.stats import boxcox
+
+# Definizione dei percorsi
+input_folder = r'C:\umidita_output\freq_relativa'
+output_folder = r'C:\umidita_output\freq_continuo'
+os.makedirs(output_folder, exist_ok=True)
+
+# Lista di file raster
+raster_files = sorted(glob.glob(os.path.join(input_folder, "*.tif")))  # Assumo TIFF come formato
+
+# Legge il primo raster per ottenere dimensioni e metadati
+sample_raster = gdal.Open(raster_files[0])
+cols = sample_raster.RasterXSize
+rows = sample_raster.RasterYSize
+geotransform = sample_raster.GetGeoTransform()
+projection = sample_raster.GetProjection()
+sample_raster = None  # Chiudi il file
+
+# Funzione per applicare trasformazioni per rendere continue le variabili
+def transform_data(data):
+    valid_mask = data > 0  # Evitiamo trasformazioni su valori 0 o NoData
+    if np.any(valid_mask):
+        transformed, _ = boxcox(data[valid_mask] + 1)  # Aggiungiamo 1 per evitare log(0)
+        data[valid_mask] = transformed
+    return data
+
+# Elaborazione di tutti i raster
+for raster_path in raster_files:
+    dataset = gdal.Open(raster_path)
+    band = dataset.GetRasterBand(1)
+    nodata_value = band.GetNoDataValue()  # Ottieni il valore NoData
+    raster_array = band.ReadAsArray().astype(np.float32)
+    dataset = None  # Chiudi il dataset
+
+    # Sostituisci il valore NoData con NaN per l'elaborazione
+    if nodata_value is not None:
+        raster_array[raster_array == nodata_value] = np.nan
+
+    # Applica la trasformazione per rendere i dati continui
+    transformed_array = transform_data(raster_array)
+
+    # Salvataggio del raster di output
+    output_path = os.path.join(output_folder, os.path.basename(raster_path))
+    driver = gdal.GetDriverByName("GTiff")
+    out_raster = driver.Create(output_path, cols, rows, 1, gdal.GDT_Float32)
+    out_raster.SetGeoTransform(geotransform)
+    out_raster.SetProjection(projection)
+    
+    out_band = out_raster.GetRasterBand(1)
+    out_band.WriteArray(transformed_array)
+    out_band.SetNoDataValue(-9999)  # Imposta NoData
+    out_band.FlushCache()
+    
+    out_raster = None  # Chiudi il raster
+
+print(f"Mappe continue salvate in {output_folder}")
