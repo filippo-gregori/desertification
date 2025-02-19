@@ -1,0 +1,56 @@
+import numpy as np
+import os
+import glob
+from osgeo import gdal, gdal_array
+
+# Definizione dei percorsi
+input_folder = r'C:\umidita'
+output_folder = r'C:\umidita_output\episodi'
+os.makedirs(output_folder, exist_ok=True)
+
+# Lista di file raster
+raster_files = sorted(glob.glob(os.path.join(input_folder, "*.tif")))  # Assumo TIFF come formato
+
+# Legge il primo raster per ottenere dimensioni e metadati
+sample_raster = gdal.Open(raster_files[0])
+cols = sample_raster.RasterXSize
+rows = sample_raster.RasterYSize
+geotransform = sample_raster.GetGeoTransform()
+projection = sample_raster.GetProjection()
+sample_raster = None  # Chiudi il file
+
+# Caricamento di tutti i raster in un array 3D (time, rows, cols)
+num_rasters = len(raster_files)
+stack = np.zeros((num_rasters, rows, cols), dtype=np.uint8)  # Supponiamo dati categorici (0-255)
+
+for i, raster_path in enumerate(raster_files):
+    dataset = gdal.Open(raster_path)
+    band = dataset.GetRasterBand(1)
+    stack[i, :, :] = band.ReadAsArray()
+    dataset = None  # Chiudi il raster
+
+# Identificazione delle categorie presenti nei dati
+unique_categories = np.unique(stack)
+
+# Creazione delle mappe del numero di episodi per ogni categoria
+for category in unique_categories:
+    if category > 7:  # Esclude la categoria 8
+        continue
+    
+    episodes_map = np.sum((stack[1:, :, :] == category) & (stack[:-1, :, :] != category), axis=0)
+
+    # Salvataggio del raster di output
+    output_path = os.path.join(output_folder, f"episodes_category_{category}.tif")
+    driver = gdal.GetDriverByName("GTiff")
+    out_raster = driver.Create(output_path, cols, rows, 1, gdal.GDT_Int32)
+    out_raster.SetGeoTransform(geotransform)
+    out_raster.SetProjection(projection)
+    
+    out_band = out_raster.GetRasterBand(1)
+    out_band.WriteArray(episodes_map)
+    out_band.SetNoDataValue(-9999)  # Imposta NoData
+    out_band.FlushCache()
+    
+    out_raster = None  # Chiudi il raster
+
+print(f"Mappe del numero di episodi salvate in {output_folder}")
