@@ -20,7 +20,7 @@ pip install -r requirements.txt
 
 ### CDS API Setup
 1. Create a free account at [Copernicus CDS](https://cds.climate.copernicus.eu)
-2. Install your API key following [these instructions](https://cds.climate.copernicus.eu/api-how-to)
+2. Install your API key following [these instructions](https://cds.climate.copernicus.eu/user-guide)
 3. Accept the ERA5 license terms in your CDS account
 
 ## Quick Start
