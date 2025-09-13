@@ -2,7 +2,7 @@
 
 A Python script to download and convert ERA5 climate data from Copernicus Climate Data Store (CDS) to daily GeoTIFF files. Perfect for climate analysis, environmental research, and machine learning applications.
 
-## 🌟 Features
+## Features
 
 - **Multiple Climate Variables**: Temperature (min/max/mean), precipitation, and evapotranspiration
 - **Daily GeoTIFF Output**: Ready-to-use raster files for GIS and analysis
@@ -11,7 +11,7 @@ A Python script to download and convert ERA5 climate data from Copernicus Climat
 - **Unit Conversion**: Automatic conversion to standard units (°C, mm/day)
 - **Robust Error Handling**: Continues processing even if individual downloads fail
 
-## 📋 Requirements
+## Requirements
 
 ### Software Dependencies
 ```bash
@@ -23,7 +23,7 @@ pip install -r requirements.txt
 2. Install your API key following [these instructions](https://cds.climate.copernicus.eu/api-how-to)
 3. Accept the ERA5 license terms in your CDS account
 
-## 🚀 Quick Start
+## Quick Start
 
 1. **Clone this repository**
    ```bash
@@ -52,7 +52,7 @@ pip install -r requirements.txt
    python era5_climate_downloader.py
    ```
 
-## 📊 Data Types
+## Data Types
 
 | Variable | Description | Units | Source Dataset |
 |----------|-------------|-------|----------------|
@@ -62,7 +62,7 @@ pip install -r requirements.txt
 | **precipitation** | Daily precipitation totals | mm/day | ERA5-Land (hourly aggregated) |
 | **evapotranspiration** | Daily potential evapotranspiration | mm/day | ERA5-Land (hourly aggregated) |
 
-## 📁 Output Structure
+## Output Structure
 
 ```
 ERA5_[DATATYPE]_[AREA]/
@@ -74,7 +74,7 @@ ERA5_[DATATYPE]_[AREA]/
     └── (temporary download files)
 ```
 
-## 🗺️ Geographic Areas
+## 🗺Geographic Areas
 
 ### Predefined Areas
 - **Italy**: `[47.0, 13.0, 39.0, 20.0]`
@@ -84,7 +84,7 @@ ERA5_[DATATYPE]_[AREA]/
 ### Custom Areas
 Define your own bounding box as `[North, West, South, East]` in decimal degrees.
 
-## 🔧 Configuration Options
+## Configuration Options
 
 ### Time Range
 ```python
@@ -98,7 +98,7 @@ END_YEAR = 2024      # Up to present (~2-month delay)
 - **Precipitation/ET**: Hourly data automatically aggregated to daily totals
 - **Automatic unit conversion**: Kelvin→°C, meters→millimeters
 
-## 📈 Performance Notes
+## Performance Notes
 
 - **Download Speed**: Temperature data is faster (pre-aggregated), precipitation/ET slower (hourly data)
 - **Storage Requirements**: ~16,000 files per variable for full time series (1979-2024)
