@@ -27,7 +27,7 @@ git clone https://github.com/filippo-gregori/desertification.git
 cd desertification
 
 # Install dependencies
-pip install -r requirements.txt
+pip install -r data_acquisition/requirements.txt
 
 # Configure CDS API (create ~/.cdsapirc file)
 echo "url: https://cds.climate.copernicus.eu/api/v2" > ~/.cdsapirc
