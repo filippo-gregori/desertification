@@ -1,144 +1,181 @@
-# ERA5 Climate Data Downloader
+# Desertification Analysis Tools
 
-A Python script to download and convert ERA5 climate data from Copernicus Climate Data Store (CDS) to daily GeoTIFF files. Perfect for climate analysis, environmental research, and machine learning applications.
+A collection of Python scripts for desertification and climate analysis using satellite and reanalysis data.
 
-## Features
+## Scripts Available
 
-- **Multiple Climate Variables**: Temperature (min/max/mean), precipitation, and evapotranspiration
-- **Daily GeoTIFF Output**: Ready-to-use raster files for GIS and analysis
-- **Flexible Geographic Areas**: Configurable bounding boxes for any region
-- **Automatic Restart**: Resumes downloads from where it left off
-- **Unit Conversion**: Automatic conversion to standard units (°C, mm/day)
-- **Robust Error Handling**: Continues processing even if individual downloads fail
+### ERA5 Temperature Downloader
+Downloads daily maximum temperature data from ERA5-Land reanalysis for desertification studies.
 
-## Requirements
+**Features:**
+- Automated download from Copernicus Climate Data Store (CDS)
+- Conversion from NetCDF to daily GeoTIFF files
+- Configurable geographic areas and time periods
+- Resume capability for interrupted downloads
+- Comprehensive logging and error handling
 
-### Software Dependencies
+## Installation
+
+### Prerequisites
+1. **CDS API Account**: Register at [Copernicus Climate Data Store](https://cds.climate.copernicus.eu/api-how-to)
+2. **CDS API Key**: Follow [these instructions](https://cds.climate.copernicus.eu/api-how-to) to set up your API key
+
+### Setup
 ```bash
+# Clone repository
+git clone https://github.com/filippo-gregori/desertification.git
+cd desertification
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Configure CDS API (create ~/.cdsapirc file)
+echo "url: https://cds.climate.copernicus.eu/api/v2" > ~/.cdsapirc
+echo "key: YOUR_CDS_API_KEY" >> ~/.cdsapirc
 ```
 
-### CDS API Setup
-1. Create a free account at [Copernicus CDS](https://cds.climate.copernicus.eu)
-2. Install your API key following [these instructions](https://cds.climate.copernicus.eu/user-guide)
-3. Accept the ERA5 license terms in your CDS account
+## Usage
 
-## Quick Start
+### ERA5 Temperature Downloader
 
-1. **Clone this repository**
-   ```bash
-   git clone https://github.com/yourusername/ERA5-Climate-Downloader.git
-   cd ERA5-Climate-Downloader
-   ```
-
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Configure the script**
-   Edit the configuration section in `era5_climate_downloader.py`:
-   ```python
-   BASE_PATH = r'C:\your\data\directory'
-   DATA_TYPE = 'tmax'  # Choose: 'tmax', 'tmin', 'tmean', 'precipitation', 'evapotranspiration'
-   AREA_NAME = 'Italy'
-   GEOGRAPHIC_AREA = [47.0, 13.0, 39.0, 20.0]  # [North, West, South, East]
-   START_YEAR = 1979
-   END_YEAR = 2024
-   ```
-
-4. **Run the script**
-   ```bash
-   python era5_climate_downloader.py
-   ```
-
-## Data Types
-
-| Variable | Description | Units | Source Dataset |
-|----------|-------------|-------|----------------|
-| **tmax** | Daily maximum temperature | °C | ERA5-Land daily statistics |
-| **tmin** | Daily minimum temperature | °C | ERA5-Land daily statistics |
-| **tmean** | Daily mean temperature | °C | ERA5-Land daily statistics |
-| **precipitation** | Daily precipitation totals | mm/day | ERA5-Land (hourly aggregated) |
-| **evapotranspiration** | Daily potential evapotranspiration | mm/day | ERA5-Land (hourly aggregated) |
-
-## Output Structure
-
+**Basic usage with configuration file:**
+```bash
+python scripts/era5_temperature_downloader.py --config config.yaml
 ```
-ERA5_[DATATYPE]_[AREA]/
-├── Daily_[Datatype]_TIF/
-│   ├── tmax_19790101.tif
-│   ├── tmax_19790102.tif
+
+**Download specific year/month:**
+```bash
+# Download entire year
+python scripts/era5_temperature_downloader.py --year 2023
+
+# Download specific month
+python scripts/era5_temperature_downloader.py --year 2023 --month 6
+```
+
+**Download custom period:**
+```bash
+python scripts/era5_temperature_downloader.py --start-year 2020 --end-year 2023
+```
+
+### Configuration
+
+Copy and modify the example configuration:
+```bash
+cp config/config_example.yaml config.yaml
+# Edit config.yaml with your preferences
+```
+
+**Key configuration options:**
+- `base_dir`: Directory where data will be stored
+- `area`: Geographic bounding box [North, West, South, East]
+- `period`: Time range to download
+- `download_delay`: Delay between downloads (respect CDS limits)
+
+### Output Structure
+
+The script creates the following directory structure:
+```
+your_base_dir/
+├── Daily_Tmax_TIF/          # Daily GeoTIFF files
+│   ├── tmax_20230601.tif
+│   ├── tmax_20230602.tif
 │   └── ...
-└── temp/
-    └── (temporary download files)
+├── temp/                    # Temporary NetCDF files (auto-deleted)
+└── era5_download.log        # Download log
 ```
 
-## 🗺Geographic Areas
+## Data Description
 
-### Predefined Areas
-- **Italy**: `[47.0, 13.0, 39.0, 20.0]`
-- **Europe**: `[71.0, -25.0, 34.0, 45.0]`
-- **Mediterranean**: `[46.0, -6.0, 30.0, 37.0]`
+**ERA5-Land Daily Maximum Temperature:**
+- **Source**: ERA5-Land reanalysis (Copernicus/ECMWF)
+- **Resolution**: ~11 km (0.1° x 0.1°)
+- **Temporal Coverage**: 1979-present
+- **Format**: GeoTIFF (Float32, LZW compressed)
+- **Units**: Degrees Celsius
+- **CRS**: WGS84 (EPSG:4326)
 
-### Custom Areas
-Define your own bounding box as `[North, West, South, East]` in decimal degrees.
+## Applications
 
-## Configuration Options
+This data is suitable for:
+- Desertification monitoring and assessment
+- Climate change impact studies
+- Agricultural drought analysis
+- Heat stress evaluation
+- Long-term temperature trend analysis
 
-### Time Range
-```python
-START_YEAR = 1979    # ERA5 data available from 1979
-START_MONTH = 1      # Resume from specific month
-END_YEAR = 2024      # Up to present (~2-month delay)
+## Example Areas
+
+**Italy (default):**
+```yaml
+area: [47.0, 13.0, 39.0, 20.0]
 ```
 
-### Data Processing
-- **Temperature data**: Pre-computed daily statistics from Copernicus
-- **Precipitation/ET**: Hourly data automatically aggregated to daily totals
-- **Automatic unit conversion**: Kelvin→°C, meters→millimeters
+**Mediterranean Basin:**
+```yaml
+area: [45.0, -10.0, 30.0, 40.0]
+```
 
-## Performance Notes
-
-- **Download Speed**: Temperature data is faster (pre-aggregated), precipitation/ET slower (hourly data)
-- **Storage Requirements**: ~16,000 files per variable for full time series (1979-2024)
-- **File Size**: ~2-10 MB per daily GeoTIFF (depends on geographic area)
-- **Restart Capability**: Script automatically skips completed months
+**Sahel Region:**
+```yaml
+area: [18.0, -20.0, 12.0, 22.0]
+```
 
 ## Troubleshooting
 
-### Common Issues
-1. **CDS API Key**: Make sure your `.cdsapirc` file is properly configured
-2. **Disk Space**: Ensure sufficient storage for the time series you're downloading
-3. **Network**: Large downloads may be interrupted; the script will resume automatically
-4. **Coordinates**: Use decimal degrees in the format `[North, West, South, East]`
+**Common Issues:**
 
-### Error Messages
-- **Download errors**: Usually temporary network issues, script will retry
-- **Conversion errors**: Check available disk space and file permissions
+1. **CDS API errors**: Verify your API key and internet connection
+2. **Disk space**: ERA5 data requires significant storage (~1GB per year for Italy)
+3. **Memory errors**: Process data in smaller time chunks for large areas
+4. **Network timeouts**: Script will retry automatically
 
-## License
+**Log files**: Check `era5_download.log` for detailed error information.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Requirements
+
+- Python 3.8+
+- cdsapi
+- xarray
+- rioxarray
+- pyyaml
+- numpy
+- netcdf4
+- rasterio
+
+See `requirements.txt` for specific versions.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+Contributions are welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Submit a pull request
 
 ## Citation
 
 If you use this tool in your research, please cite:
 ```
-Gregori, F. (2024). Desertification Analysis with Remote Sensing Analysis. 
+Gregori, F. (2025). Desertification Analysis Tools. 
 GitHub repository: https://github.com/filippo-gregori/desertification
 ```
 
+## License
+
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
 ## Acknowledgments
 
-- **Copernicus Climate Change Service (C3S)** for providing ERA5 data
-- **European Centre for Medium-Range Weather Forecasts (ECMWF)** for ERA5 reanalysis
-- Data source: Hersbach, H., Bell, B., Berrisford, P., et al. (2020). The ERA5 global reanalysis. Q J R Meteorol Soc, 146: 1999-2049.
+- [Copernicus Climate Data Store](https://cds.climate.copernicus.eu/) for ERA5 data
+- ECMWF for ERA5-Land reanalysis
+- xarray and rioxarray communities for excellent Python tools
 
----
+## Contact
 
-**Need help?** Open an issue or check the [CDS documentation](https://cds.climate.copernicus.eu/cdsapp#!/dataset/reanalysis-era5-land).
+Filippo Gregori - [filippo.gregori@domain.com]
+
+Project Link: https://github.com/filippo-gregori/desertification
