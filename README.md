@@ -176,6 +176,6 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 ## Contact
 
-Filippo Gregori - [filippo.gregori@domain.com]
+Filippo Gregori - [filippo.gregori3@unibo.it]
 
 Project Link: https://github.com/filippo-gregori/desertification
